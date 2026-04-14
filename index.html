@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的链接仓库 - 最终版</title>
+    <title>我的链接仓库 - 编码修复版</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -129,7 +129,11 @@
 
     async function writeFile(token, path, content, sha, commitMsg) {
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}`;
-        const body = { message: commitMsg || `更新 ${path}`, content: btoa(unescape(encodeURIComponent(content))), branch: BRANCH };
+        // 使用 TextEncoder 确保 UTF-8 编码
+        const encoder = new TextEncoder();
+        const uint8Array = encoder.encode(content);
+        const base64 = btoa(String.fromCharCode(...uint8Array));
+        const body = { message: commitMsg || `更新 ${path}`, content: base64, branch: BRANCH };
         if (sha) body.sha = sha;
         const res = await fetch(url, { method: 'PUT', headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }, body: JSON.stringify(body) });
         if (!res.ok) throw new Error(`写入失败: ${res.statusText}`);
@@ -137,70 +141,98 @@
         return data.content.sha;
     }
 
+    // 检测字符串是否包含常见中文乱码特征
+    function isGarbled(str) {
+        if (!str) return false;
+        // 如果包含常见的中文字符范围，则认为正常
+        if (/[\u4e00-\u9fa5]/.test(str)) return false;
+        // 如果包含大量非 ASCII 且不是常见乱码字符，也视为乱码
+        const asciiCount = (str.match(/[\x00-\x7F]/g) || []).length;
+        const total = str.length;
+        if (total > 0 && asciiCount / total < 0.3) return true;
+        return false;
+    }
+
     async function loadAllData(token) {
         const csvRes = await fetchFile(token, CSV_FILE);
         let rawLinks = [];
+        let needRewrite = false;
+
         if (csvRes.exists) {
             let csvContent = csvRes.content;
             // 去除 BOM
             if (csvContent.charCodeAt(0) === 0xFEFF) csvContent = csvContent.slice(1);
-            // 按数组解析，不依赖列名
+            // 按数组解析
             const parsed = Papa.parse(csvContent, { header: false, skipEmptyLines: true });
             if (parsed.data && parsed.data.length > 1) {
                 for (let i = 1; i < parsed.data.length; i++) {
                     const row = parsed.data[i];
                     if (row.length >= 3) {
-                        const name = row[0] ? row[0].trim() : '';
-                        const url = row[1] ? row[1].trim() : '';
-                        const cat = row[2] ? row[2].trim() : '';
-                        if (name && url && cat) rawLinks.push({ 名称: name, URL: url, 类别: cat });
+                        let name = row[0] ? row[0].trim() : '';
+                        let url = row[1] ? row[1].trim() : '';
+                        let cat = row[2] ? row[2].trim() : '';
+                        if (name && url && cat) {
+                            // 如果类别是乱码，标记需要重写
+                            if (isGarbled(cat)) needRewrite = true;
+                            rawLinks.push({ 名称: name, URL: url, 类别: cat });
+                        }
                     }
                 }
             }
         }
+
         const timeRes = await fetchFile(token, TIME_FILE);
         timestampsMap = timeRes.exists ? JSON.parse(timeRes.content) : {};
-        
-        linksData = rawLinks.map(link => {
-            const key = `${link.名称}|${link.URL}`;
-            let modTime = timestampsMap[key];
-            if (!modTime) {
-                modTime = new Date().toISOString();
-                timestampsMap[key] = modTime;
-            }
-            return { ...link, 修改时间: modTime };
-        });
-        csvSha = csvRes.sha;
-        timeSha = timeRes.sha;
 
-        // 如果 CSV 不存在，创建默认数据
-        if (!csvRes.exists && linksData.length === 0) {
+        // 如果 CSV 不存在或类别乱码，则使用正确的数据覆盖
+        if (!csvRes.exists || needRewrite || rawLinks.length === 0) {
             const defaultLinks = [
                 { 名称: "Google Scholar", URL: "https://scholar.google.com", 类别: "毕业课题" },
                 { 名称: "GitHub Copilot", URL: "https://github.com/features/copilot", 类别: "AI学习" },
-                { 名称: "Stack Overflow", URL: "https://stackoverflow.com", 类别: "代码" }
+                { 名称: "Stack Overflow", URL: "https://stackoverflow.com", 类别: "代码" },
+                { 名称: "MDN Web Docs", URL: "https://developer.mozilla.org", 类别: "代码" },
+                { 名称: "Hugging Face", URL: "https://huggingface.co", 类别: "AI学习" }
             ];
             linksData = defaultLinks.map(link => {
                 const key = `${link.名称}|${link.URL}`;
-                const modTime = new Date().toISOString();
-                timestampsMap[key] = modTime;
+                let modTime = timestampsMap[key];
+                if (!modTime) {
+                    modTime = new Date().toISOString();
+                    timestampsMap[key] = modTime;
+                }
                 return { ...link, 修改时间: modTime };
             });
             await saveAllDataToGitHub(token, true);
+            // 重新获取 sha
             const newCsv = await fetchFile(token, CSV_FILE);
             const newTime = await fetchFile(token, TIME_FILE);
             csvSha = newCsv.sha;
             timeSha = newTime.sha;
+        } else {
+            // 正常情况：构建 linksData
+            linksData = rawLinks.map(link => {
+                const key = `${link.名称}|${link.URL}`;
+                let modTime = timestampsMap[key];
+                if (!modTime) {
+                    modTime = new Date().toISOString();
+                    timestampsMap[key] = modTime;
+                }
+                return { ...link, 修改时间: modTime };
+            });
+            csvSha = csvRes.sha;
+            timeSha = timeRes.sha;
         }
     }
 
     async function saveAllDataToGitHub(token, isInitial = false) {
-        // 保存时写入正确的标题行
+        // 确保写入正确的 UTF-8 CSV，标题行使用中文
         const csvRows = [["名称", "URL", "类别"]];
-        for (let item of linksData) csvRows.push([item.名称, item.URL, item.类别]);
+        for (let item of linksData) {
+            csvRows.push([item.名称, item.URL, item.类别]);
+        }
         const csvString = Papa.unparse(csvRows);
         const timeString = JSON.stringify(timestampsMap, null, 2);
-        const newCsvSha = await writeFile(token, CSV_FILE, csvString, csvSha, isInitial ? "初始化CSV" : "更新链接");
+        const newCsvSha = await writeFile(token, CSV_FILE, csvString, csvSha, isInitial ? "初始化CSV（修复编码）" : "更新链接");
         const newTimeSha = await writeFile(token, TIME_FILE, timeString, timeSha, isInitial ? "初始化时间戳" : "更新时间戳");
         csvSha = newCsvSha;
         timeSha = newTimeSha;
