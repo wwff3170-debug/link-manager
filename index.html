@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的链接仓库 - 最终修复版</title>
+    <title>我的链接仓库 - 最终版</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -120,15 +120,10 @@
 
     async function fetchFile(token, path) {
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}?ref=${BRANCH}`;
-        console.log(`[DEBUG] 读取文件: ${url}`);
         const res = await fetch(url, { headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
-        if (res.status === 404) {
-            console.warn(`[DEBUG] 文件不存在: ${path}`);
-            return { exists: false, content: null, sha: null };
-        }
-        if (!res.ok) throw new Error(`读取 ${path} 失败 (${res.status}): ${res.statusText}`);
+        if (res.status === 404) return { exists: false, content: null, sha: null };
+        if (!res.ok) throw new Error(`读取 ${path} 失败: ${res.statusText}`);
         const data = await res.json();
-        console.log(`[DEBUG] 成功读取 ${path}, sha=${data.sha.substring(0,7)}`);
         return { exists: true, content: atob(data.content), sha: data.sha };
     }
 
@@ -136,103 +131,49 @@
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}`;
         const body = { message: commitMsg || `更新 ${path}`, content: btoa(unescape(encodeURIComponent(content))), branch: BRANCH };
         if (sha) body.sha = sha;
-        console.log(`[DEBUG] 写入文件: ${path}, 分支=${BRANCH}, sha=${sha ? sha.substring(0,7) : '无'}`);
         const res = await fetch(url, { method: 'PUT', headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }, body: JSON.stringify(body) });
-        if (!res.ok) throw new Error(`写入失败 (${res.status}): ${res.statusText}`);
+        if (!res.ok) throw new Error(`写入失败: ${res.statusText}`);
         const data = await res.json();
-        console.log(`[DEBUG] 写入成功，新sha=${data.content.sha.substring(0,7)}`);
         return data.content.sha;
     }
 
-    // 智能匹配列名：在给定的行对象中，查找最接近的键（忽略大小写和前后空格）
-    function getValueByPossibleKeys(row, possibleKeys) {
-        if (!row) return null;
-        // 先尝试直接匹配
-        for (let key of possibleKeys) {
-            if (row[key] !== undefined && row[key] !== null && row[key].trim() !== '') {
-                return row[key].trim();
-            }
-        }
-        // 尝试不区分大小写匹配
-        const lowerKeys = Object.keys(row).reduce((acc, k) => { acc[k.toLowerCase()] = k; return acc; }, {});
-        for (let key of possibleKeys) {
-            const lowerKey = key.toLowerCase();
-            if (lowerKeys[lowerKey]) {
-                const val = row[lowerKeys[lowerKey]];
-                if (val && val.trim()) return val.trim();
-            }
-        }
-        // 尝试包含匹配（例如 " 名称 " 包含 "名称"）
-        for (let existingKey of Object.keys(row)) {
-            const trimmedKey = existingKey.trim();
-            for (let key of possibleKeys) {
-                if (trimmedKey === key || trimmedKey.includes(key) || key.includes(trimmedKey)) {
-                    const val = row[existingKey];
-                    if (val && val.trim()) return val.trim();
-                }
-            }
-        }
-        return null;
-    }
-
     async function loadAllData(token) {
-        console.log("[DEBUG] 开始加载数据...");
         const csvRes = await fetchFile(token, CSV_FILE);
         let rawLinks = [];
-        if (!csvRes.exists) {
-            console.log("[DEBUG] CSV 不存在，准备创建默认数据");
-        } else {
+        if (csvRes.exists) {
             let csvContent = csvRes.content;
-            // 去除 UTF-8 BOM
-            if (csvContent.charCodeAt(0) === 0xFEFF) {
-                csvContent = csvContent.slice(1);
-                console.log("[DEBUG] 已去除 BOM 头");
-            }
-            const parsed = Papa.parse(csvContent, { header: true, skipEmptyLines: true, trimHeaders: true });
-            console.log("[DEBUG] PapaParse 结果:", parsed);
-            if (parsed.errors.length) {
-                console.warn("[DEBUG] 解析警告:", parsed.errors);
-            }
-            // 调试：打印第一行的键名
-            if (parsed.data && parsed.data.length > 0) {
-                console.log("[DEBUG] CSV第一行的键名:", Object.keys(parsed.data[0]));
-            }
-            // 使用智能匹配提取数据
-            rawLinks = [];
-            for (let row of parsed.data) {
-                const name = getValueByPossibleKeys(row, ['名称', 'name', '标题', 'title']);
-                const url = getValueByPossibleKeys(row, ['URL', 'url', '链接', 'link']);
-                const cat = getValueByPossibleKeys(row, ['类别', 'category', '分类', 'type']);
-                if (name && url && cat) {
-                    rawLinks.push({ 名称: name, URL: url, 类别: cat });
-                } else {
-                    console.log("[DEBUG] 跳过无效行:", row);
+            // 去除 BOM
+            if (csvContent.charCodeAt(0) === 0xFEFF) csvContent = csvContent.slice(1);
+            // 按数组解析，不依赖列名
+            const parsed = Papa.parse(csvContent, { header: false, skipEmptyLines: true });
+            if (parsed.data && parsed.data.length > 1) {
+                for (let i = 1; i < parsed.data.length; i++) {
+                    const row = parsed.data[i];
+                    if (row.length >= 3) {
+                        const name = row[0] ? row[0].trim() : '';
+                        const url = row[1] ? row[1].trim() : '';
+                        const cat = row[2] ? row[2].trim() : '';
+                        if (name && url && cat) rawLinks.push({ 名称: name, URL: url, 类别: cat });
+                    }
                 }
             }
-            console.log(`[DEBUG] 从 CSV 解析到 ${rawLinks.length} 条链接`);
         }
         const timeRes = await fetchFile(token, TIME_FILE);
-        if (timeRes.exists) {
-            timestampsMap = JSON.parse(timeRes.content);
-            console.log(`[DEBUG] 加载时间戳文件，共 ${Object.keys(timestampsMap).length} 条记录`);
-        } else {
-            timestampsMap = {};
-            console.log("[DEBUG] 时间戳文件不存在，初始化空对象");
-        }
-
+        timestampsMap = timeRes.exists ? JSON.parse(timeRes.content) : {};
+        
         linksData = rawLinks.map(link => {
             const key = `${link.名称}|${link.URL}`;
             let modTime = timestampsMap[key];
             if (!modTime) {
                 modTime = new Date().toISOString();
                 timestampsMap[key] = modTime;
-                console.log(`[DEBUG] 为链接 "${link.名称}" 生成新时间戳`);
             }
             return { ...link, 修改时间: modTime };
         });
         csvSha = csvRes.sha;
         timeSha = timeRes.sha;
 
+        // 如果 CSV 不存在，创建默认数据
         if (!csvRes.exists && linksData.length === 0) {
             const defaultLinks = [
                 { 名称: "Google Scholar", URL: "https://scholar.google.com", 类别: "毕业课题" },
@@ -245,25 +186,24 @@
                 timestampsMap[key] = modTime;
                 return { ...link, 修改时间: modTime };
             });
-            console.log("[DEBUG] 创建默认数据并写入 GitHub");
             await saveAllDataToGitHub(token, true);
             const newCsv = await fetchFile(token, CSV_FILE);
             const newTime = await fetchFile(token, TIME_FILE);
             csvSha = newCsv.sha;
             timeSha = newTime.sha;
         }
-        console.log(`[DEBUG] 数据加载完成，共 ${linksData.length} 条链接`);
     }
 
     async function saveAllDataToGitHub(token, isInitial = false) {
-        const csvRows = linksData.map(item => ({ 名称: item.名称, URL: item.URL, 类别: item.类别 }));
+        // 保存时写入正确的标题行
+        const csvRows = [["名称", "URL", "类别"]];
+        for (let item of linksData) csvRows.push([item.名称, item.URL, item.类别]);
         const csvString = Papa.unparse(csvRows);
         const timeString = JSON.stringify(timestampsMap, null, 2);
         const newCsvSha = await writeFile(token, CSV_FILE, csvString, csvSha, isInitial ? "初始化CSV" : "更新链接");
         const newTimeSha = await writeFile(token, TIME_FILE, timeString, timeSha, isInitial ? "初始化时间戳" : "更新时间戳");
         csvSha = newCsvSha;
         timeSha = newTimeSha;
-        console.log("[DEBUG] 数据保存成功");
     }
 
     function renderTable() {
@@ -277,7 +217,6 @@
             html += `<tr><td class="name-col link-name"><a href="${escapeHtml(item.URL)}" target="_blank">${escapeHtml(item.名称)}</a></td><td class="time-col">${formatDate(item.修改时间)}</td></tr>`;
         }
         tableBody.innerHTML = html;
-        console.log(`[DEBUG] 表格渲染完成，当前分类 "${currentCategory}" 显示 ${filtered.length} 条`);
     }
 
     function renderManagementList() {
@@ -359,7 +298,7 @@
             statusDiv.innerHTML = '<div class="status-success">✅ 验证成功，数据已加载</div>';
             renderTable();
         } catch (err) {
-            console.error("[ERROR] 验证失败:", err);
+            console.error(err);
             statusDiv.innerHTML = `<div class="status-error">❌ 错误: ${err.message}</div>`;
             githubToken = null;
         }
