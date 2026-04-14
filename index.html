@@ -20,7 +20,6 @@
             overflow-x: hidden;
         }
 
-        /* 动态背景装饰 */
         .bg-shape {
             position: fixed;
             top: -20%;
@@ -52,7 +51,6 @@
             100% { transform: translate(-5%, -5%) scale(1.2); opacity: 0.6; }
         }
 
-        /* 头部图片区域 */
         .hero {
             text-align: center;
             margin-top: 24px;
@@ -75,7 +73,7 @@
             width: 100%;
             height: auto;
             display: block;
-            opacity: 0.7;   /* 调淡图片透明度 */
+            opacity: 0.7;
             transition: opacity 0.4s;
         }
         .hero-text {
@@ -96,7 +94,6 @@
             background: rgba(0, 0, 0, 0.15);
         }
 
-        /* 网站名称（现代标识） */
         .site-title {
             text-align: center;
             margin-top: 20px;
@@ -113,7 +110,6 @@
             text-shadow: 0 2px 8px rgba(0,0,0,0.05);
         }
 
-        /* 导航栏 - 水平居中 */
         .navbar {
             display: flex;
             justify-content: center;
@@ -155,7 +151,6 @@
             box-shadow: 0 4px 12px rgba(44, 124, 182, 0.3);
         }
 
-        /* 内容卡片 */
         .container {
             max-width: 1300px;
             margin: 20px auto 50px;
@@ -168,7 +163,6 @@
             box-shadow: 0 15px 35px rgba(0, 0, 0, 0.05);
             overflow: hidden;
             border: 1px solid rgba(255, 255, 255, 0.5);
-            transition: all 0.3s;
         }
         .table-wrapper {
             overflow-x: auto;
@@ -210,7 +204,6 @@
             font-style: italic;
         }
 
-        /* 管理员按钮 */
         .admin-float {
             position: fixed;
             bottom: 30px;
@@ -239,7 +232,6 @@
             box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25);
         }
 
-        /* 模态框（管理员） */
         .modal {
             display: none;
             position: fixed;
@@ -331,7 +323,6 @@
         .status-error { background: #ffe2e2; color: #b00020; }
         .status-success { background: #dff0e4; color: #1e6f3f; }
 
-        /* 编辑表格样式 */
         .admin-table {
             width: 100%;
             border-collapse: collapse;
@@ -396,7 +387,6 @@
 <div class="bg-shape"></div>
 <div class="bg-shape2"></div>
 
-<!-- 图片区域 + 行书文字 -->
 <div class="hero">
     <div class="image-wrapper">
         <img src="photo.png" alt="banner" class="hero-img" onerror="this.style.opacity='0'; this.nextSibling.style.display='none';">
@@ -404,12 +394,10 @@
     </div>
 </div>
 
-<!-- 网站名称 -->
 <div class="site-title">
     <div class="site-name">ArticleNavigation</div>
 </div>
 
-<!-- 水平导航栏 -->
 <div class="navbar">
     <div class="nav-links" id="navLinks"></div>
 </div>
@@ -425,12 +413,10 @@
     </div>
 </div>
 
-<!-- 悬浮管理员按钮 -->
 <div class="admin-float">
     <button class="admin-circle" id="adminFloatBtn">⚙️</button>
 </div>
 
-<!-- 管理员模态框 -->
 <div id="adminModal" class="modal">
     <div class="modal-content">
         <div class="modal-header">
@@ -486,10 +472,11 @@
 
     // 全局状态
     let linksData = [];          // { 名称, URL, 类别, 修改时间 }
-    let timestampsMap = {};
     let currentCategory = CATEGORIES_ORDER[0];
     let githubToken = null;
-    let editData = [];           // 编辑时深拷贝数据
+    let editData = [];
+    let currentTimeMap = {};
+    let currentCsvSha = null, currentTimeSha = null;
 
     // DOM 元素
     const navLinksDiv = document.getElementById("navLinks");
@@ -519,27 +506,54 @@
     function fixUrl(url) { let u = url.trim(); if (!u) return '#'; if (!/^https?:\/\//i.test(u)) u = 'https://' + u; return u; }
     function makeKey(name, url) { return `${name}|${url}`; }
 
-    // 按类别顺序排序（稳定）
     function sortByCategoryOrder(arr) {
         const orderMap = {};
         CATEGORIES_ORDER.forEach((cat, idx) => { orderMap[cat] = idx; });
         return arr.slice().sort((a, b) => (orderMap[a.类别] || 999) - (orderMap[b.类别] || 999));
     }
 
-    // ========== GitHub API（公开读取 + Token写入） ==========
-    async function fetchFilePublic(path) {
-        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}?ref=${BRANCH}`;
-        const res = await fetch(url);
-        if (res.status === 404) return null;
-        if (!res.ok) throw new Error(`读取失败 (${res.status})`);
-        const data = await res.json();
-        const binary = atob(data.content);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        const content = new TextDecoder('utf-8').decode(bytes);
-        return { content, sha: data.sha };
+    // ========== 公开读取（使用相对路径，无 API 限制） ==========
+    async function loadPublicData() {
+        try {
+            // 读取 CSV 文件（同目录）
+            const csvResp = await fetch('./' + CSV_FILE);
+            if (!csvResp.ok) throw new Error(`CSV 加载失败 (${csvResp.status})`);
+            let csvText = await csvResp.text();
+            if (csvText.charCodeAt(0) === 0xFEFF) csvText = csvText.slice(1);
+            const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+            const rawLinks = [];
+            for (let row of parsed.data) {
+                const name = (row['名称'] || '').trim();
+                const url = (row['URL'] || '').trim();
+                const cat = (row['类别'] || '').trim();
+                if (name && url && cat) rawLinks.push({ 名称: name, URL: fixUrl(url), 类别: cat });
+            }
+            // 读取时间戳文件（同样使用相对路径）
+            let timeMap = {};
+            try {
+                const timeResp = await fetch('./' + TIME_FILE);
+                if (timeResp.ok) {
+                    let timeText = await timeResp.text();
+                    if (timeText.charCodeAt(0) === 0xFEFF) timeText = timeText.slice(1);
+                    timeMap = JSON.parse(timeText);
+                }
+            } catch(e) { console.warn("时间戳文件不存在或无法读取", e); }
+            // 合并时间戳
+            let combined = rawLinks.map(link => {
+                const key = makeKey(link.名称, link.URL);
+                let modTime = timeMap[key];
+                if (!modTime) modTime = new Date().toISOString();
+                return { ...link, 修改时间: modTime };
+            });
+            combined = sortByCategoryOrder(combined);
+            return combined;
+        } catch(e) {
+            console.error("公开加载失败", e);
+            return [];
+        }
     }
 
+    // ========== 带 Token 的 API 操作（用于写入） ==========
     async function fetchFileWithToken(token, path) {
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}?ref=${BRANCH}`;
         const res = await fetch(url, { headers: { 'Authorization': `token ${token}` } });
@@ -572,42 +586,6 @@
         return result.content.sha;
     }
 
-    // 从 CSV 解析（公开，不需要Token）
-    async function loadPublicData() {
-        try {
-            const csvFile = await fetchFilePublic(CSV_FILE);
-            let rawLinks = [];
-            if (csvFile) {
-                let csvContent = csvFile.content;
-                if (csvContent.charCodeAt(0) === 0xFEFF) csvContent = csvContent.slice(1);
-                const parsed = Papa.parse(csvContent, { header: true, skipEmptyLines: true });
-                for (let row of parsed.data) {
-                    const name = (row['名称'] || '').trim();
-                    const url = (row['URL'] || '').trim();
-                    const cat = (row['类别'] || '').trim();
-                    if (name && url && cat) rawLinks.push({ 名称: name, URL: fixUrl(url), 类别: cat });
-                }
-            }
-            const timeFile = await fetchFilePublic(TIME_FILE);
-            let timeMap = {};
-            if (timeFile) timeMap = JSON.parse(timeFile.content);
-            // 合并时间戳
-            let combined = rawLinks.map(link => {
-                const key = makeKey(link.名称, link.URL);
-                let modTime = timeMap[key];
-                if (!modTime) modTime = new Date().toISOString();
-                return { ...link, 修改时间: modTime };
-            });
-            // 按类别排序
-            combined = sortByCategoryOrder(combined);
-            return combined;
-        } catch(e) {
-            console.warn("公开加载失败", e);
-            return [];
-        }
-    }
-
-    // 带Token加载（用于编辑）
     async function loadDataWithToken(token) {
         const csvFile = await fetchFileWithToken(token, CSV_FILE);
         let rawLinks = [];
@@ -634,13 +612,10 @@
         return { data: combined, timeMap, csvSha: csvFile?.sha, timeSha: timeFile?.sha };
     }
 
-    // 保存全部（需要Token）
     async function saveAllToGitHub(token, dataToSave, timeMap, csvSha, timeSha) {
         const sortedData = sortByCategoryOrder(dataToSave);
         const csvRows = [["名称", "URL", "类别"]];
-        for (let item of sortedData) {
-            csvRows.push([item.名称, item.URL, item.类别]);
-        }
+        for (let item of sortedData) csvRows.push([item.名称, item.URL, item.类别]);
         const csvString = Papa.unparse(csvRows);
         const timeString = JSON.stringify(timeMap, null, 2);
         const newCsvSha = await writeFileWithToken(token, CSV_FILE, csvString, csvSha, "更新链接数据");
@@ -652,7 +627,7 @@
     async function refreshMainPage() {
         const newData = await loadPublicData();
         if (newData.length === 0) {
-            tableBody.innerHTML = `<td><td colspan="2" class="empty-msg">✨ 暂无链接，点击右下角管理员添加</td></tr>`;
+            tableBody.innerHTML = `<tr><td colspan="2" class="empty-msg">✨ 暂无链接，点击右下角管理员添加</td></tr>`;
             linksData = [];
         } else {
             linksData = newData;
@@ -692,11 +667,7 @@
         tableBody.innerHTML = html;
     }
 
-    // ========== 管理员面板逻辑 ==========
-    let currentEditData = [];
-    let currentTimeMap = {};
-    let currentCsvSha = null, currentTimeSha = null;
-
+    // ========== 管理员面板 ==========
     function renderEditTable() {
         let filtered = [...currentEditData];
         const kw = searchInput.value.trim().toLowerCase();
@@ -705,7 +676,7 @@
         for (let i = 0; i < filtered.length; i++) {
             const item = filtered[i];
             const row = editTableBody.insertRow();
-            // 类别下拉
+            // 类别
             const catCell = row.insertCell(0);
             const catSelect = document.createElement('select');
             CATEGORIES_ORDER.forEach(cat => {
@@ -742,6 +713,8 @@
             actionCell.appendChild(delBtn);
         }
     }
+
+    let currentEditData = [];
 
     function addNewEditItem() {
         const cat = newCat.value;
@@ -784,7 +757,6 @@
         if (!githubToken) { adminStatus.innerHTML = '<span class="status-error">Token 无效，请重新解锁</span>'; return; }
         adminStatus.innerHTML = '<span class="status-msg">保存中...</span>';
         try {
-            // 更新 timestampsMap：为每个链接生成/保留修改时间
             const newTimeMap = {};
             for (let item of currentEditData) {
                 const key = makeKey(item.名称, item.URL);
@@ -793,12 +765,10 @@
                 newTimeMap[key] = oldTime;
             }
             await saveAllToGitHub(githubToken, currentEditData, newTimeMap, currentCsvSha, currentTimeSha);
-            // 重新加载公开数据以刷新主页面
-            await refreshMainPage();
+            await refreshMainPage();  // 重新加载公开数据
             adminStatus.innerHTML = '<span class="status-success">✅ 保存成功！数据已同步</span>';
             setTimeout(() => { adminStatus.innerHTML = ''; }, 3000);
-            // 更新当前时间戳映射和sha
-            currentTimeMap = newTimeMap;
+            // 更新 sha 以便后续增量保存
             const { csvSha: newCsvSha, timeSha: newTimeSha } = await (async () => {
                 const csvF = await fetchFileWithToken(githubToken, CSV_FILE);
                 const timeF = await fetchFileWithToken(githubToken, TIME_FILE);
@@ -806,6 +776,7 @@
             })();
             currentCsvSha = newCsvSha;
             currentTimeSha = newTimeSha;
+            currentTimeMap = newTimeMap;
         } catch(err) {
             adminStatus.innerHTML = `<span class="status-error">❌ 保存失败: ${err.message}</span>`;
         }
