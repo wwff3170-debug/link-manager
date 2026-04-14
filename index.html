@@ -3,9 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的链接仓库</title>
+    <title>我的链接仓库 - 调试版</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
+        /* 样式与之前相同，省略以节省篇幅，但你可以复制之前的完整样式 */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: system-ui, sans-serif; background: #f5f7fb; color: #1e293b; }
         .navbar { background: white; border-bottom: 1px solid #e2e8f0; padding: 0 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; }
@@ -91,18 +92,18 @@
 </div>
 
 <script>
-    // ========== 配置（根据你的仓库修改） ==========
+    // ========== 配置（请根据你的仓库修改） ==========
     const REPO_OWNER = "wwff3170-debug";
     const REPO_NAME   = "link-manager";
     const CSV_FILE = "links.csv";
     const TIME_FILE = ".timestamps.json";
     const CATEGORIES = ["毕业课题", "AI学习", "代码", "实用工具", "其他"];
-    // 如果你的默认分支是 master，请将下面的 "main" 改为 "master"
-    const BRANCH = "main";   // 或 "master"
+    // ⚠️ 重要：将下面的 BRANCH 改为你的默认分支名（通常是 main 或 master）
+    const BRANCH = "main";   // 👈 如果默认分支是 master，请改为 "master"
     // =============================================
 
     let currentCategory = "毕业课题";
-    let linksData = [];          // { 名称, URL, 类别, 修改时间 }
+    let linksData = [];
     let timestampsMap = {};
     let githubToken = null;
     let csvSha = null, timeSha = null;
@@ -115,16 +116,20 @@
     const tokenAuthArea = document.getElementById("tokenAuthArea");
     const managementPanel = document.getElementById("managementPanel");
 
-    function escapeHtml(str) { if(!str) return ''; return str.replace(/[&<>]/g, function(m){ if(m==='&') return '&amp;'; if(m==='<') return '&lt;'; if(m==='>') return '&gt;'; return m;}); }
+    function escapeHtml(str) { if(!str) return ''; return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
     function formatDate(iso) { if(!iso) return "未知"; try { return new Date(iso).toLocaleString('zh-CN'); } catch(e){ return iso; } }
 
-    // 读取文件（带分支指定）
     async function fetchFile(token, path) {
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}?ref=${BRANCH}`;
+        console.log(`[DEBUG] 读取文件: ${url}`);
         const res = await fetch(url, { headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
-        if (res.status === 404) return { exists: false, content: null, sha: null };
-        if (!res.ok) throw new Error(`读取 ${path} 失败: ${res.statusText}`);
+        if (res.status === 404) {
+            console.warn(`[DEBUG] 文件不存在: ${path}`);
+            return { exists: false, content: null, sha: null };
+        }
+        if (!res.ok) throw new Error(`读取 ${path} 失败 (${res.status}): ${res.statusText}`);
         const data = await res.json();
+        console.log(`[DEBUG] 成功读取 ${path}, sha=${data.sha.substring(0,7)}`);
         return { exists: true, content: atob(data.content), sha: data.sha };
     }
 
@@ -132,41 +137,47 @@
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}`;
         const body = { message: commitMsg || `更新 ${path}`, content: btoa(unescape(encodeURIComponent(content))), branch: BRANCH };
         if (sha) body.sha = sha;
+        console.log(`[DEBUG] 写入文件: ${path}, 分支=${BRANCH}, 现有sha=${sha ? sha.substring(0,7) : '无'}`);
         const res = await fetch(url, { method: 'PUT', headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }, body: JSON.stringify(body) });
-        if (!res.ok) throw new Error(`写入失败: ${res.statusText}`);
+        if (!res.ok) throw new Error(`写入失败 (${res.status}): ${res.statusText}`);
         const data = await res.json();
+        console.log(`[DEBUG] 写入成功，新sha=${data.content.sha.substring(0,7)}`);
         return data.content.sha;
     }
 
-    // 加载 CSV 和 timestamps
     async function loadAllData(token) {
+        console.log("[DEBUG] 开始加载数据...");
         const csvRes = await fetchFile(token, CSV_FILE);
         let rawLinks = [];
         if (!csvRes.exists) {
-            rawLinks = [];
+            console.log("[DEBUG] CSV 不存在，准备创建默认数据");
         } else {
             const parsed = Papa.parse(csvRes.content, { header: true, skipEmptyLines: true });
             rawLinks = parsed.data.filter(row => row.名称 && row.URL && row.类别);
+            console.log(`[DEBUG] 从 CSV 解析到 ${rawLinks.length} 条链接`);
         }
         const timeRes = await fetchFile(token, TIME_FILE);
         if (timeRes.exists) {
             timestampsMap = JSON.parse(timeRes.content);
+            console.log(`[DEBUG] 加载时间戳文件，共 ${Object.keys(timestampsMap).length} 条记录`);
         } else {
             timestampsMap = {};
+            console.log("[DEBUG] 时间戳文件不存在，初始化空对象");
         }
-        // 合并时间戳
+
         linksData = rawLinks.map(link => {
             const key = `${link.名称}|${link.URL}`;
             let modTime = timestampsMap[key];
             if (!modTime) {
                 modTime = new Date().toISOString();
                 timestampsMap[key] = modTime;
+                console.log(`[DEBUG] 为链接 "${link.名称}" 生成新时间戳`);
             }
             return { ...link, 修改时间: modTime };
         });
         csvSha = csvRes.sha;
         timeSha = timeRes.sha;
-        // 如果 CSV 不存在，创建默认数据
+
         if (!csvRes.exists && linksData.length === 0) {
             const defaultLinks = [
                 { 名称: "Google Scholar", URL: "https://scholar.google.com", 类别: "毕业课题" },
@@ -179,12 +190,14 @@
                 timestampsMap[key] = modTime;
                 return { ...link, 修改时间: modTime };
             });
+            console.log("[DEBUG] 创建默认数据并写入 GitHub");
             await saveAllDataToGitHub(token, true);
             const newCsv = await fetchFile(token, CSV_FILE);
             const newTime = await fetchFile(token, TIME_FILE);
             csvSha = newCsv.sha;
             timeSha = newTime.sha;
         }
+        console.log(`[DEBUG] 数据加载完成，共 ${linksData.length} 条链接`);
     }
 
     async function saveAllDataToGitHub(token, isInitial = false) {
@@ -195,12 +208,13 @@
         const newTimeSha = await writeFile(token, TIME_FILE, timeString, timeSha, isInitial ? "初始化时间戳" : "更新时间戳");
         csvSha = newCsvSha;
         timeSha = newTimeSha;
+        console.log("[DEBUG] 数据保存成功");
     }
 
     function renderTable() {
         const filtered = linksData.filter(item => item.类别 === currentCategory);
         if (filtered.length === 0) {
-            tableBody.innerHTML = '<td><td colspan="2" class="empty-msg">✨ 暂无链接，点击右上角管理员添加</td></tr>';
+            tableBody.innerHTML = '<tr><td colspan="2" class="empty-msg">✨ 暂无链接，点击右上角管理员添加</td></tr>';
             return;
         }
         let html = '';
@@ -208,6 +222,7 @@
             html += `<tr><td class="name-col link-name"><a href="${escapeHtml(item.URL)}" target="_blank">${escapeHtml(item.名称)}</a></td><td class="time-col">${formatDate(item.修改时间)}</td></tr>`;
         }
         tableBody.innerHTML = html;
+        console.log(`[DEBUG] 表格渲染完成，当前分类 "${currentCategory}" 显示 ${filtered.length} 条`);
     }
 
     function renderManagementList() {
@@ -277,7 +292,7 @@
         const token = document.getElementById("githubTokenInput").value.trim();
         if (!token) { document.getElementById("tokenStatusMsg").innerHTML = '<div class="status-error">请输入 Token</div>'; return; }
         const statusDiv = document.getElementById("tokenStatusMsg");
-        statusDiv.innerHTML = '<div class="status-msg">验证中...</div>';
+        statusDiv.innerHTML = '<div class="status-msg">⏳ 验证中...</div>';
         try {
             await loadAllData(token);
             githubToken = token;
@@ -289,6 +304,7 @@
             statusDiv.innerHTML = '<div class="status-success">✅ 验证成功，数据已加载</div>';
             renderTable();
         } catch (err) {
+            console.error("[ERROR] 验证失败:", err);
             statusDiv.innerHTML = `<div class="status-error">❌ 错误: ${err.message}</div>`;
             githubToken = null;
         }
