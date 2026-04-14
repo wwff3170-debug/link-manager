@@ -3,10 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的链接仓库 - 调试版</title>
+    <title>我的链接仓库 - 修复版</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
-        /* 样式与之前相同，省略以节省篇幅，但你可以复制之前的完整样式 */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: system-ui, sans-serif; background: #f5f7fb; color: #1e293b; }
         .navbar { background: white; border-bottom: 1px solid #e2e8f0; padding: 0 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; }
@@ -55,7 +54,7 @@
         <div class="table-wrapper">
             <table class="links-table">
                 <thead><tr><th class="name-col">名称</th><th class="time-col">修改时间</th></tr></thead>
-                <tbody id="tableBody"><tr><td colspan="2" class="empty-msg">加载中...</td></tr></tbody>
+                <tbody id="tableBody"><tr><td colspan="2" class="empty-msg">加载中......</td></tr></tbody>
             </table>
         </div>
     </div>
@@ -92,15 +91,14 @@
 </div>
 
 <script>
-    // ========== 配置（请根据你的仓库修改） ==========
+    // ========== 配置 ==========
     const REPO_OWNER = "wwff3170-debug";
     const REPO_NAME   = "link-manager";
     const CSV_FILE = "links.csv";
     const TIME_FILE = ".timestamps.json";
     const CATEGORIES = ["毕业课题", "AI学习", "代码", "实用工具", "其他"];
-    // ⚠️ 重要：将下面的 BRANCH 改为你的默认分支名（通常是 main 或 master）
-    const BRANCH = "main";   // 👈 如果默认分支是 master，请改为 "master"
-    // =============================================
+    const BRANCH = "main";
+    // =========================
 
     let currentCategory = "毕业课题";
     let linksData = [];
@@ -137,7 +135,7 @@
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}`;
         const body = { message: commitMsg || `更新 ${path}`, content: btoa(unescape(encodeURIComponent(content))), branch: BRANCH };
         if (sha) body.sha = sha;
-        console.log(`[DEBUG] 写入文件: ${path}, 分支=${BRANCH}, 现有sha=${sha ? sha.substring(0,7) : '无'}`);
+        console.log(`[DEBUG] 写入文件: ${path}, 分支=${BRANCH}, sha=${sha ? sha.substring(0,7) : '无'}`);
         const res = await fetch(url, { method: 'PUT', headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }, body: JSON.stringify(body) });
         if (!res.ok) throw new Error(`写入失败 (${res.status}): ${res.statusText}`);
         const data = await res.json();
@@ -152,8 +150,28 @@
         if (!csvRes.exists) {
             console.log("[DEBUG] CSV 不存在，准备创建默认数据");
         } else {
-            const parsed = Papa.parse(csvRes.content, { header: true, skipEmptyLines: true });
-            rawLinks = parsed.data.filter(row => row.名称 && row.URL && row.类别);
+            let csvContent = csvRes.content;
+            // 去除 UTF-8 BOM
+            if (csvContent.charCodeAt(0) === 0xFEFF) {
+                csvContent = csvContent.slice(1);
+                console.log("[DEBUG] 已去除 BOM 头");
+            }
+            const parsed = Papa.parse(csvContent, { header: true, skipEmptyLines: true, trimHeaders: true });
+            console.log("[DEBUG] PapaParse 结果:", parsed);
+            if (parsed.errors.length) {
+                console.warn("[DEBUG] 解析警告:", parsed.errors);
+            }
+            // 兼容列名可能包含空格或大小写
+            rawLinks = parsed.data.filter(row => {
+                const name = row['名称'] || row['name'];
+                const url = row['URL'] || row['url'];
+                const cat = row['类别'] || row['category'];
+                return name && url && cat;
+            }).map(row => ({
+                名称: (row['名称'] || row['name']).trim(),
+                URL: (row['URL'] || row['url']).trim(),
+                类别: (row['类别'] || row['category']).trim()
+            }));
             console.log(`[DEBUG] 从 CSV 解析到 ${rawLinks.length} 条链接`);
         }
         const timeRes = await fetchFile(token, TIME_FILE);
