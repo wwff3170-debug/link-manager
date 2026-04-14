@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>志存高远 · 链接库</title>
+    <title>ArticleNavigation · 志存高远</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * {
@@ -61,7 +61,7 @@
         .image-wrapper {
             display: inline-block;
             position: relative;
-            max-width: 976px;
+            max-width: 1302px;
             width: 90%;
             border-radius: 32px;
             overflow: hidden;
@@ -75,7 +75,7 @@
             width: 100%;
             height: auto;
             display: block;
-            opacity: 0.92;
+            opacity: 0.7;   /* 调淡图片透明度 */
             transition: opacity 0.4s;
         }
         .hero-text {
@@ -96,11 +96,28 @@
             background: rgba(0, 0, 0, 0.15);
         }
 
+        /* 网站名称（现代标识） */
+        .site-title {
+            text-align: center;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        .site-name {
+            font-size: 2rem;
+            font-weight: 600;
+            background: linear-gradient(135deg, #1e6a9e, #3a9bd5);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            letter-spacing: 1px;
+            text-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
         /* 导航栏 - 水平居中 */
         .navbar {
             display: flex;
             justify-content: center;
-            margin: 30px auto 20px;
+            margin: 20px auto 20px;
             padding: 0 20px;
         }
         .nav-links {
@@ -371,6 +388,7 @@
             .hero-text { font-size: 1.4rem; white-space: nowrap; letter-spacing: 2px; }
             .nav-btn { padding: 6px 16px; font-size: 0.9rem; }
             .modal-body { padding: 16px; }
+            .site-name { font-size: 1.5rem; }
         }
     </style>
 </head>
@@ -378,12 +396,17 @@
 <div class="bg-shape"></div>
 <div class="bg-shape2"></div>
 
-<!-- 图片区域 + 文字 -->
+<!-- 图片区域 + 行书文字 -->
 <div class="hero">
     <div class="image-wrapper">
         <img src="photo.png" alt="banner" class="hero-img" onerror="this.style.opacity='0'; this.nextSibling.style.display='none';">
         <div class="hero-text">志存高远，明辨笃行</div>
     </div>
+</div>
+
+<!-- 网站名称 -->
+<div class="site-title">
+    <div class="site-name">ArticleNavigation</div>
 </div>
 
 <!-- 水平导航栏 -->
@@ -629,7 +652,7 @@
     async function refreshMainPage() {
         const newData = await loadPublicData();
         if (newData.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="2" class="empty-msg">✨ 暂无链接，点击右下角管理员添加</td></tr>`;
+            tableBody.innerHTML = `<td><td colspan="2" class="empty-msg">✨ 暂无链接，点击右下角管理员添加</td></tr>`;
             linksData = [];
         } else {
             linksData = newData;
