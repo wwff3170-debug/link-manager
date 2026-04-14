@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的链接仓库 - 修复版</title>
+    <title>我的链接仓库 - 最终修复版</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -54,7 +54,8 @@
         <div class="table-wrapper">
             <table class="links-table">
                 <thead><tr><th class="name-col">名称</th><th class="time-col">修改时间</th></tr></thead>
-                <tbody id="tableBody"><tr><td colspan="2" class="empty-msg">加载中......</td></tr></tbody>
+                <tbody id="tableBody"><tr><td colspan="2" class="empty-msg">加载中...</td></tr>
+                </tbody>
             </table>
         </div>
     </div>
@@ -143,6 +144,37 @@
         return data.content.sha;
     }
 
+    // 智能匹配列名：在给定的行对象中，查找最接近的键（忽略大小写和前后空格）
+    function getValueByPossibleKeys(row, possibleKeys) {
+        if (!row) return null;
+        // 先尝试直接匹配
+        for (let key of possibleKeys) {
+            if (row[key] !== undefined && row[key] !== null && row[key].trim() !== '') {
+                return row[key].trim();
+            }
+        }
+        // 尝试不区分大小写匹配
+        const lowerKeys = Object.keys(row).reduce((acc, k) => { acc[k.toLowerCase()] = k; return acc; }, {});
+        for (let key of possibleKeys) {
+            const lowerKey = key.toLowerCase();
+            if (lowerKeys[lowerKey]) {
+                const val = row[lowerKeys[lowerKey]];
+                if (val && val.trim()) return val.trim();
+            }
+        }
+        // 尝试包含匹配（例如 " 名称 " 包含 "名称"）
+        for (let existingKey of Object.keys(row)) {
+            const trimmedKey = existingKey.trim();
+            for (let key of possibleKeys) {
+                if (trimmedKey === key || trimmedKey.includes(key) || key.includes(trimmedKey)) {
+                    const val = row[existingKey];
+                    if (val && val.trim()) return val.trim();
+                }
+            }
+        }
+        return null;
+    }
+
     async function loadAllData(token) {
         console.log("[DEBUG] 开始加载数据...");
         const csvRes = await fetchFile(token, CSV_FILE);
@@ -161,17 +193,22 @@
             if (parsed.errors.length) {
                 console.warn("[DEBUG] 解析警告:", parsed.errors);
             }
-            // 兼容列名可能包含空格或大小写
-            rawLinks = parsed.data.filter(row => {
-                const name = row['名称'] || row['name'];
-                const url = row['URL'] || row['url'];
-                const cat = row['类别'] || row['category'];
-                return name && url && cat;
-            }).map(row => ({
-                名称: (row['名称'] || row['name']).trim(),
-                URL: (row['URL'] || row['url']).trim(),
-                类别: (row['类别'] || row['category']).trim()
-            }));
+            // 调试：打印第一行的键名
+            if (parsed.data && parsed.data.length > 0) {
+                console.log("[DEBUG] CSV第一行的键名:", Object.keys(parsed.data[0]));
+            }
+            // 使用智能匹配提取数据
+            rawLinks = [];
+            for (let row of parsed.data) {
+                const name = getValueByPossibleKeys(row, ['名称', 'name', '标题', 'title']);
+                const url = getValueByPossibleKeys(row, ['URL', 'url', '链接', 'link']);
+                const cat = getValueByPossibleKeys(row, ['类别', 'category', '分类', 'type']);
+                if (name && url && cat) {
+                    rawLinks.push({ 名称: name, URL: url, 类别: cat });
+                } else {
+                    console.log("[DEBUG] 跳过无效行:", row);
+                }
+            }
             console.log(`[DEBUG] 从 CSV 解析到 ${rawLinks.length} 条链接`);
         }
         const timeRes = await fetchFile(token, TIME_FILE);
