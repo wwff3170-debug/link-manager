@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的链接仓库 - 编码修复版</title>
+    <title>我的链接仓库 - 强制同步版</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -40,6 +40,7 @@
         .status-success { background: #dcfce7; color: #166534; }
         .link-item { background: #fafcff; border: 1px solid #e9edf2; border-radius: 20px; padding: 16px; margin-bottom: 12px; }
         hr { margin: 20px 0; }
+        .sync-btn { margin-left: 12px; background: #10b981; color: white; border: none; padding: 6px 12px; border-radius: 20px; cursor: pointer; font-size: 0.8rem; }
     </style>
 </head>
 <body>
@@ -84,7 +85,10 @@
                     <button id="addLinkBtn" class="btn-primary">添加</button>
                 </div>
                 <hr />
-                <h4>📋 现有链接列表</h4>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h4>📋 现有链接列表</h4>
+                    <button id="forceSyncBtn" class="sync-btn">💾 强制同步到仓库</button>
+                </div>
                 <div id="linksListContainer"></div>
             </div>
         </div>
@@ -114,128 +118,160 @@
     const closeAdminModal = document.getElementById("closeAdminModal");
     const tokenAuthArea = document.getElementById("tokenAuthArea");
     const managementPanel = document.getElementById("managementPanel");
+    const forceSyncBtn = document.getElementById("forceSyncBtn");
 
     function escapeHtml(str) { if(!str) return ''; return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
     function formatDate(iso) { if(!iso) return "未知"; try { return new Date(iso).toLocaleString('zh-CN'); } catch(e){ return iso; } }
 
-    async function fetchFile(token, path) {
+    // 获取文件信息（包括 sha）
+    async function fetchFileInfo(token, path) {
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}?ref=${BRANCH}`;
         const res = await fetch(url, { headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
-        if (res.status === 404) return { exists: false, content: null, sha: null };
-        if (!res.ok) throw new Error(`读取 ${path} 失败: ${res.statusText}`);
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`获取 ${path} 信息失败: ${res.statusText}`);
         const data = await res.json();
-        return { exists: true, content: atob(data.content), sha: data.sha };
+        return data;
     }
 
-    async function writeFile(token, path, content, sha, commitMsg) {
+    // 写入文件（自动处理编码，不使用 btoa 避免中文问题）
+    async function writeFile(token, path, content, commitMsg) {
+        // 获取当前文件 sha（如果存在）
+        let sha = null;
+        try {
+            const info = await fetchFileInfo(token, path);
+            if (info) sha = info.sha;
+        } catch(e) { console.warn(`获取 ${path} sha 失败，将创建新文件`, e); }
+        
         const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${path}`;
-        // 使用 TextEncoder 确保 UTF-8 编码
+        // 使用 TextEncoder 将 UTF-8 字符串转为 base64
         const encoder = new TextEncoder();
-        const uint8Array = encoder.encode(content);
-        const base64 = btoa(String.fromCharCode(...uint8Array));
-        const body = { message: commitMsg || `更新 ${path}`, content: base64, branch: BRANCH };
+        const data = encoder.encode(content);
+        let binary = '';
+        for (let i = 0; i < data.length; i++) binary += String.fromCharCode(data[i]);
+        const base64Content = btoa(binary);
+        
+        const body = { message: commitMsg, content: base64Content, branch: BRANCH };
         if (sha) body.sha = sha;
-        const res = await fetch(url, { method: 'PUT', headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' }, body: JSON.stringify(body) });
-        if (!res.ok) throw new Error(`写入失败: ${res.statusText}`);
+        
+        const res = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`写入失败 (${res.status}): ${errText}`);
+        }
+        const result = await res.json();
+        return result.content.sha;
+    }
+
+    // 读取 CSV 内容（仅读取，不依赖列名）
+    async function loadCsvData(token) {
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${CSV_FILE}?ref=${BRANCH}`;
+        const res = await fetch(url, { headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`读取 CSV 失败: ${res.statusText}`);
         const data = await res.json();
-        return data.content.sha;
-    }
-
-    // 检测字符串是否包含常见中文乱码特征
-    function isGarbled(str) {
-        if (!str) return false;
-        // 如果包含常见的中文字符范围，则认为正常
-        if (/[\u4e00-\u9fa5]/.test(str)) return false;
-        // 如果包含大量非 ASCII 且不是常见乱码字符，也视为乱码
-        const asciiCount = (str.match(/[\x00-\x7F]/g) || []).length;
-        const total = str.length;
-        if (total > 0 && asciiCount / total < 0.3) return true;
-        return false;
-    }
-
-    async function loadAllData(token) {
-        const csvRes = await fetchFile(token, CSV_FILE);
-        let rawLinks = [];
-        let needRewrite = false;
-
-        if (csvRes.exists) {
-            let csvContent = csvRes.content;
-            // 去除 BOM
-            if (csvContent.charCodeAt(0) === 0xFEFF) csvContent = csvContent.slice(1);
-            // 按数组解析
-            const parsed = Papa.parse(csvContent, { header: false, skipEmptyLines: true });
-            if (parsed.data && parsed.data.length > 1) {
-                for (let i = 1; i < parsed.data.length; i++) {
-                    const row = parsed.data[i];
-                    if (row.length >= 3) {
-                        let name = row[0] ? row[0].trim() : '';
-                        let url = row[1] ? row[1].trim() : '';
-                        let cat = row[2] ? row[2].trim() : '';
-                        if (name && url && cat) {
-                            // 如果类别是乱码，标记需要重写
-                            if (isGarbled(cat)) needRewrite = true;
-                            rawLinks.push({ 名称: name, URL: url, 类别: cat });
-                        }
-                    }
-                }
+        const content = atob(data.content);
+        // 去除 BOM
+        const cleanContent = content.charCodeAt(0) === 0xFEFF ? content.slice(1) : content;
+        const parsed = Papa.parse(cleanContent, { header: false, skipEmptyLines: true });
+        const rows = [];
+        for (let i = 1; i < parsed.data.length; i++) {
+            const row = parsed.data[i];
+            if (row.length >= 3 && row[0] && row[1] && row[2]) {
+                rows.push({ 名称: row[0].trim(), URL: row[1].trim(), 类别: row[2].trim() });
             }
         }
+        return { rows, sha: data.sha };
+    }
 
-        const timeRes = await fetchFile(token, TIME_FILE);
-        timestampsMap = timeRes.exists ? JSON.parse(timeRes.content) : {};
+    // 加载时间戳文件
+    async function loadTimestamps(token) {
+        const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${TIME_FILE}?ref=${BRANCH}`;
+        const res = await fetch(url, { headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' } });
+        if (res.status === 404) return { map: {}, sha: null };
+        if (!res.ok) throw new Error(`读取时间戳失败: ${res.statusText}`);
+        const data = await res.json();
+        const content = atob(data.content);
+        const map = JSON.parse(content);
+        return { map, sha: data.sha };
+    }
 
-        // 如果 CSV 不存在或类别乱码，则使用正确的数据覆盖
-        if (!csvRes.exists || needRewrite || rawLinks.length === 0) {
-            const defaultLinks = [
-                { 名称: "Google Scholar", URL: "https://scholar.google.com", 类别: "毕业课题" },
-                { 名称: "GitHub Copilot", URL: "https://github.com/features/copilot", 类别: "AI学习" },
-                { 名称: "Stack Overflow", URL: "https://stackoverflow.com", 类别: "代码" },
-                { 名称: "MDN Web Docs", URL: "https://developer.mozilla.org", 类别: "代码" },
-                { 名称: "Hugging Face", URL: "https://huggingface.co", 类别: "AI学习" }
-            ];
-            linksData = defaultLinks.map(link => {
-                const key = `${link.名称}|${link.URL}`;
-                let modTime = timestampsMap[key];
-                if (!modTime) {
-                    modTime = new Date().toISOString();
-                    timestampsMap[key] = modTime;
-                }
-                return { ...link, 修改时间: modTime };
-            });
-            await saveAllDataToGitHub(token, true);
-            // 重新获取 sha
-            const newCsv = await fetchFile(token, CSV_FILE);
-            const newTime = await fetchFile(token, TIME_FILE);
-            csvSha = newCsv.sha;
-            timeSha = newTime.sha;
-        } else {
-            // 正常情况：构建 linksData
-            linksData = rawLinks.map(link => {
-                const key = `${link.名称}|${link.URL}`;
-                let modTime = timestampsMap[key];
-                if (!modTime) {
-                    modTime = new Date().toISOString();
-                    timestampsMap[key] = modTime;
-                }
-                return { ...link, 修改时间: modTime };
-            });
-            csvSha = csvRes.sha;
-            timeSha = timeRes.sha;
+    // 强制将当前内存中的数据同步到仓库（覆盖）
+    async function forceSyncToGitHub(token) {
+        // 生成 CSV 内容（UTF-8，正确标题）
+        const csvRows = [["名称", "URL", "类别"]];
+        for (let item of linksData) csvRows.push([item.名称, item.URL, item.类别]);
+        const csvString = Papa.unparse(csvRows);
+        const timeString = JSON.stringify(timestampsMap, null, 2);
+        
+        try {
+            const newCsvSha = await writeFile(token, CSV_FILE, csvString, "强制同步链接数据（修复编码）");
+            const newTimeSha = await writeFile(token, TIME_FILE, timeString, "强制同步时间戳");
+            console.log("强制同步成功", newCsvSha, newTimeSha);
+            return true;
+        } catch(err) {
+            console.error("强制同步失败", err);
+            throw err;
         }
     }
 
-    async function saveAllDataToGitHub(token, isInitial = false) {
-        // 确保写入正确的 UTF-8 CSV，标题行使用中文
-        const csvRows = [["名称", "URL", "类别"]];
-        for (let item of linksData) {
-            csvRows.push([item.名称, item.URL, item.类别]);
+    // 初始化数据：优先从仓库读取，如果仓库没有或读取失败，则使用内存中的 linksData（如果有），否则使用默认数据
+    async function loadAllData(token) {
+        // 尝试从仓库读取 CSV
+        let csvResult = null;
+        try {
+            csvResult = await loadCsvData(token);
+        } catch(e) { console.warn("读取 CSV 失败，将使用内存数据", e); }
+        
+        let timeResult = null;
+        try {
+            timeResult = await loadTimestamps(token);
+        } catch(e) { console.warn("读取时间戳失败", e); }
+        
+        if (csvResult && csvResult.rows.length > 0) {
+            // 仓库中有有效数据，使用仓库数据
+            const rawLinks = csvResult.rows;
+            const timeMap = timeResult ? timeResult.map : {};
+            linksData = rawLinks.map(link => {
+                const key = `${link.名称}|${link.URL}`;
+                let modTime = timeMap[key];
+                if (!modTime) {
+                    modTime = new Date().toISOString();
+                    timeMap[key] = modTime;
+                }
+                return { ...link, 修改时间: modTime };
+            });
+            timestampsMap = timeMap;
+            // 保存 sha（供后续增量更新，但强制同步会覆盖，所以不重要）
+        } else {
+            // 仓库无有效数据，检查内存中是否已有数据（例如从之前的 session 或默认）
+            if (linksData.length === 0) {
+                // 使用默认数据
+                const defaultLinks = [
+                    { 名称: "Google Scholar", URL: "https://scholar.google.com", 类别: "毕业课题" },
+                    { 名称: "GitHub Copilot", URL: "https://github.com/features/copilot", 类别: "AI学习" },
+                    { 名称: "Stack Overflow", URL: "https://stackoverflow.com", 类别: "代码" },
+                    { 名称: "MDN Web Docs", URL: "https://developer.mozilla.org", 类别: "代码" },
+                    { 名称: "Hugging Face", URL: "https://huggingface.co", 类别: "AI学习" }
+                ];
+                const timeMap = timeResult ? timeResult.map : {};
+                linksData = defaultLinks.map(link => {
+                    const key = `${link.名称}|${link.URL}`;
+                    let modTime = timeMap[key];
+                    if (!modTime) {
+                        modTime = new Date().toISOString();
+                        timeMap[key] = modTime;
+                    }
+                    return { ...link, 修改时间: modTime };
+                });
+                timestampsMap = timeMap;
+            }
+            // 此时 linksData 已有数据（可能是之前添加的），但仓库中没有，需要同步一次
+            await forceSyncToGitHub(token);
         }
-        const csvString = Papa.unparse(csvRows);
-        const timeString = JSON.stringify(timestampsMap, null, 2);
-        const newCsvSha = await writeFile(token, CSV_FILE, csvString, csvSha, isInitial ? "初始化CSV（修复编码）" : "更新链接");
-        const newTimeSha = await writeFile(token, TIME_FILE, timeString, timeSha, isInitial ? "初始化时间戳" : "更新时间戳");
-        csvSha = newCsvSha;
-        timeSha = newTimeSha;
     }
 
     function renderTable() {
@@ -281,7 +317,7 @@
         const newTime = new Date().toISOString();
         timestampsMap[newKey] = newTime;
         linksData[idx] = { 名称: newName, URL: newUrl, 类别: newCat, 修改时间: newTime };
-        await saveAllDataToGitHub(githubToken);
+        await forceSyncToGitHub(githubToken);
         renderTable();
         renderManagementList();
     }
@@ -291,7 +327,7 @@
         const key = `${item.名称}|${item.URL}`;
         delete timestampsMap[key];
         linksData.splice(idx, 1);
-        await saveAllDataToGitHub(githubToken);
+        await forceSyncToGitHub(githubToken);
         renderTable();
         renderManagementList();
     }
@@ -307,7 +343,7 @@
         const now = new Date().toISOString();
         timestampsMap[key] = now;
         linksData.push({ 名称: name, URL: url, 类别: category, 修改时间: now });
-        await saveAllDataToGitHub(githubToken);
+        await forceSyncToGitHub(githubToken);
         renderTable();
         renderManagementList();
         document.getElementById("newName").value = "";
@@ -335,6 +371,24 @@
             githubToken = null;
         }
     }
+
+    // 强制同步按钮
+    forceSyncBtn.onclick = async () => {
+        if (!githubToken) { alert("请先验证 Token"); return; }
+        const btn = forceSyncBtn;
+        const originalText = btn.innerText;
+        btn.innerText = "同步中...";
+        btn.disabled = true;
+        try {
+            await forceSyncToGitHub(githubToken);
+            alert("同步成功！数据已写入仓库。");
+        } catch(err) {
+            alert("同步失败: " + err.message);
+        } finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+    };
 
     function buildNavbar() {
         navLinksDiv.innerHTML = '';
