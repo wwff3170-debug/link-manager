@@ -467,11 +467,10 @@
         const REPO_OWNER = "wwff3170-debug";
         const REPO_NAME   = "link-manager";
         const CSV_FILE = "links.csv";
-        const TIME_FILE = ".timestamps.json";
+        const TIME_FILE = "timestamps.json";   // 已去掉开头的点
         const CATEGORIES_ORDER = ["毕业喽", "AI学习", "代码", "学习", "杂乱学习", "实用工具", "就业考公", "其他"];
         const BRANCH = "main";
 
-        // 全局状态
         let linksData = [];
         let currentCategory = CATEGORIES_ORDER[0];
         let githubToken = null;
@@ -528,7 +527,7 @@
                     const cat = (row['类别'] || '').trim();
                     if (name && url && cat) rawLinks.push({ 名称: name, URL: fixUrl(url), 类别: cat });
                 }
-                // 读取时间戳文件
+                // 读取时间戳文件（公开，可能不存在）
                 let timeMap = {};
                 try {
                     const timeResp = await fetch('./' + TIME_FILE);
@@ -536,8 +535,13 @@
                         let timeText = await timeResp.text();
                         if (timeText.charCodeAt(0) === 0xFEFF) timeText = timeText.slice(1);
                         timeMap = JSON.parse(timeText);
+                        console.log("成功加载时间戳文件，记录数:", Object.keys(timeMap).length);
+                    } else {
+                        console.warn("时间戳文件不存在或无法读取 (HTTP", timeResp.status, ")");
                     }
-                } catch(e) { /* 时间戳文件可能不存在 */ }
+                } catch(e) {
+                    console.warn("读取时间戳文件失败:", e);
+                }
                 // 合并时间戳
                 let combined = rawLinks.map(link => {
                     const key = makeKey(link.名称, link.URL);
@@ -625,7 +629,7 @@
         async function refreshMainPage() {
             const newData = await loadPublicData();
             if (newData.length === 0) {
-                tableBody.innerHTML = `<tr><td colspan="2" class="empty-msg">✨ 暂无链接，点击右下角管理员添加</td></tr>`;
+                tableBody.innerHTML = '<tr><td colspan="2" class="empty-msg">✨ 暂无链接，点击右下角管理员添加</td></tr>';
                 linksData = [];
             } else {
                 linksData = newData;
@@ -652,7 +656,7 @@
         function renderMainTable() {
             const filtered = linksData.filter(item => item.类别 === currentCategory);
             if (filtered.length === 0) {
-                tableBody.innerHTML = `<tr><td colspan="2" class="empty-msg">📭 该分类暂无链接</td></tr>`;
+                tableBody.innerHTML = '<tr><td colspan="2" class="empty-msg">📭 该分类暂无链接</td></tr>';
                 return;
             }
             let html = '';
@@ -775,8 +779,7 @@
                     item.修改时间 = modTime;
                 }
                 await saveAllToGitHub(githubToken, currentEditData, newTimeMap, currentCsvSha, currentTimeSha);
-                // 重新加载公开数据以刷新主页面，确保修改时间正确显示
-                await refreshMainPage();
+                await refreshMainPage();  // 重新加载公开数据，确保修改时间正确显示
                 adminStatus.innerHTML = '<span class="status-success">✅ 保存成功！数据已同步</span>';
                 setTimeout(() => { adminStatus.innerHTML = ''; }, 3000);
                 // 更新 sha 和时间映射
