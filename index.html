@@ -6,6 +6,7 @@
     <title>ArticleNavigation · 志存高远</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
+        /* 样式与上一版完全相同，为节省篇幅此处省略，实际使用时请复制之前完整样式 */
         * {
             margin: 0;
             padding: 0;
@@ -435,7 +436,8 @@
             <div id="managementPanel" style="display:none;">
                 <div class="add-bar">
                     <select id="newCat">
-                        <option>毕业课题</option><option>AI学习</option><option>代码</option><option>实用工具</option><option>其他</option>
+                        <!-- 新分类顺序 -->
+                        <option>毕业喽</option><option>AI学习</option><option>代码</option><option>学习</option><option>杂乱学习</option><option>实用工具</option><option>就业考公</option><option>其他</option>
                     </select>
                     <input type="text" id="newName" placeholder="名称">
                     <input type="text" id="newUrl" placeholder="网址 (http://...)">
@@ -467,7 +469,8 @@
     const REPO_NAME   = "link-manager";
     const CSV_FILE = "links.csv";
     const TIME_FILE = ".timestamps.json";
-    const CATEGORIES_ORDER = ["毕业课题", "AI学习", "代码", "实用工具", "其他"];
+    // 新分类顺序
+    const CATEGORIES_ORDER = ["毕业喽", "AI学习", "代码", "学习", "杂乱学习", "实用工具", "就业考公", "其他"];
     const BRANCH = "main";
 
     // 全局状态
@@ -502,7 +505,7 @@
 
     // ========== 工具函数 ==========
     function escapeHtml(str) { if (!str) return ''; return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m])); }
-    function formatDate(iso) { if (!iso) return "未知"; try { return new Date(iso).toLocaleString('zh-CN'); } catch(e) { return iso; } }
+    function formatDate(iso) { if (!iso) return "-"; try { return new Date(iso).toLocaleString('zh-CN'); } catch(e) { return "-"; } }
     function fixUrl(url) { let u = url.trim(); if (!u) return '#'; if (!/^https?:\/\//i.test(u)) u = 'https://' + u; return u; }
     function makeKey(name, url) { return `${name}|${url}`; }
 
@@ -515,7 +518,6 @@
     // ========== 公开读取（使用相对路径，无 API 限制） ==========
     async function loadPublicData() {
         try {
-            // 读取 CSV 文件（同目录）
             const csvResp = await fetch('./' + CSV_FILE);
             if (!csvResp.ok) throw new Error(`CSV 加载失败 (${csvResp.status})`);
             let csvText = await csvResp.text();
@@ -528,7 +530,7 @@
                 const cat = (row['类别'] || '').trim();
                 if (name && url && cat) rawLinks.push({ 名称: name, URL: fixUrl(url), 类别: cat });
             }
-            // 读取时间戳文件（同样使用相对路径）
+            // 读取时间戳文件
             let timeMap = {};
             try {
                 const timeResp = await fetch('./' + TIME_FILE);
@@ -537,12 +539,11 @@
                     if (timeText.charCodeAt(0) === 0xFEFF) timeText = timeText.slice(1);
                     timeMap = JSON.parse(timeText);
                 }
-            } catch(e) { console.warn("时间戳文件不存在或无法读取", e); }
-            // 合并时间戳
+            } catch(e) { /* 时间戳文件可能不存在 */ }
+            // 合并时间戳：如果没有时间戳，则显示 "-"
             let combined = rawLinks.map(link => {
                 const key = makeKey(link.名称, link.URL);
-                let modTime = timeMap[key];
-                if (!modTime) modTime = new Date().toISOString();
+                const modTime = timeMap[key] || null;
                 return { ...link, 修改时间: modTime };
             });
             combined = sortByCategoryOrder(combined);
@@ -604,8 +605,7 @@
         let timeMap = timeFile ? JSON.parse(timeFile.content) : {};
         let combined = rawLinks.map(link => {
             const key = makeKey(link.名称, link.URL);
-            let modTime = timeMap[key];
-            if (!modTime) modTime = new Date().toISOString();
+            const modTime = timeMap[key] || null;  // 不自动生成
             return { ...link, 修改时间: modTime };
         });
         combined = sortByCategoryOrder(combined);
@@ -627,7 +627,7 @@
     async function refreshMainPage() {
         const newData = await loadPublicData();
         if (newData.length === 0) {
-            tableBody.innerHTML = `<tr><td colspan="2" class="empty-msg">✨ 暂无链接，点击右下角管理员添加</td></tr>`;
+            tableBody.innerHTML = `<td><td colspan="2" class="empty-msg">✨ 暂无链接，点击右下角管理员添加</td></tr>`;
             linksData = [];
         } else {
             linksData = newData;
@@ -668,6 +668,8 @@
     }
 
     // ========== 管理员面板 ==========
+    let currentEditData = [];
+
     function renderEditTable() {
         let filtered = [...currentEditData];
         const kw = searchInput.value.trim().toLowerCase();
@@ -676,7 +678,7 @@
         for (let i = 0; i < filtered.length; i++) {
             const item = filtered[i];
             const row = editTableBody.insertRow();
-            // 类别
+            // 类别下拉（使用新分类）
             const catCell = row.insertCell(0);
             const catSelect = document.createElement('select');
             CATEGORIES_ORDER.forEach(cat => {
@@ -714,8 +716,6 @@
         }
     }
 
-    let currentEditData = [];
-
     function addNewEditItem() {
         const cat = newCat.value;
         const name = newName.value.trim();
@@ -724,7 +724,9 @@
         url = fixUrl(url);
         const exists = currentEditData.some(item => item.名称 === name && item.URL === url);
         if (exists) { alert("链接已存在"); return; }
-        currentEditData.push({ 名称: name, URL: url, 类别: cat });
+        // 新增时生成当前时间
+        const now = new Date().toISOString();
+        currentEditData.push({ 名称: name, URL: url, 类别: cat, 修改时间: now });
         currentEditData = sortByCategoryOrder(currentEditData);
         renderEditTable();
         newName.value = '';
@@ -757,18 +759,161 @@
         if (!githubToken) { adminStatus.innerHTML = '<span class="status-error">Token 无效，请重新解锁</span>'; return; }
         adminStatus.innerHTML = '<span class="status-msg">保存中...</span>';
         try {
+            // 构建新的时间戳映射：保留原有时间，对于没有时间戳的（如旧数据）不自动生成，但编辑或新增时已有时间
             const newTimeMap = {};
             for (let item of currentEditData) {
                 const key = makeKey(item.名称, item.URL);
-                let oldTime = currentTimeMap[key];
-                if (!oldTime) oldTime = new Date().toISOString();
-                newTimeMap[key] = oldTime;
+                // 如果 item 本身带有修改时间（新增或编辑时已设置），则使用它；否则从 currentTimeMap 中取
+                let modTime = item.修改时间;
+                if (!modTime) modTime = currentTimeMap[key];
+                if (modTime) newTimeMap[key] = modTime;
+                // 注意：如果既没有 item.修改时间 也没有旧时间，这条记录将没有时间戳，保存时不会写入 timeMap
+                // 但这种情况不应该发生，因为新增时已生成，编辑时也会更新
             }
             await saveAllToGitHub(githubToken, currentEditData, newTimeMap, currentCsvSha, currentTimeSha);
             await refreshMainPage();  // 重新加载公开数据
             adminStatus.innerHTML = '<span class="status-success">✅ 保存成功！数据已同步</span>';
             setTimeout(() => { adminStatus.innerHTML = ''; }, 3000);
-            // 更新 sha 以便后续增量保存
+            // 更新 sha
+            const { csvSha: newCsvSha, timeSha: newTimeSha } = await (async () => {
+                const csvF = await fetchFileWithToken(githubToken, CSV_FILE);
+                const timeF = await fetchFileWithToken(githubToken, TIME_FILE);
+                return { csvSha: csvF?.sha, timeSha: timeF?.sha };
+            })();
+            currentCsvSha = newCsvSha;
+            currentTimeSha = newTimeSha;
+            currentTimeMap = newTimeMap;
+            // 更新 currentEditData 中的修改时间字段，使其与 timeMap 一致（便于下次编辑）
+            for (let item of currentEditData) {
+                const key = makeKey(item.名称, item.URL);
+                item.修改时间 = newTimeMap[key];
+            }
+        } catch(err) {
+            adminStatus.innerHTML = `<span class="status-error">❌ 保存失败: ${err.message}</span>`;
+        }
+    }
+
+    // 编辑链接时更新修改时间（在编辑表格中，双击或修改后保存时，但我们的编辑表格是直接修改字段，需要额外处理）
+    // 为了让编辑时能更新时间，我们在每次编辑（名称、URL、类别改变）时，设置该链接的修改时间为当前时间。
+    // 但由于表格中的输入框是实时绑定的，我们可以在输入事件中更新时间。但注意：如果只是修改类别，也应该更新时间。
+    // 为了简化且符合要求，我们在用户点击“保存到仓库”时，检查每个链接的修改时间：如果它在 currentEditData 中但修改时间与 currentTimeMap 中不一致（或者没有），则更新为当前时间。
+    // 更简单：在保存时，对于 currentEditData 中所有链接，如果它们的当前内容与之前加载时的内容不同（需要比较），但实现复杂。
+    // 实际上，用户期望的是：当在管理员界面中编辑了某个链接（名称、URL或类别），保存时该链接的修改时间应更新为当前时间。
+    // 我们可以在编辑表格的输入框 change 事件中标记该链接为已修改，并在保存时更新时间。
+    // 为了代码简洁，我们采用以下策略：在 saveEditToGithub 中，遍历 currentEditData，对于每一个链接，检查它是否在 currentTimeMap 中存在且值相同（忽略时间比较），
+    // 或者简单点：只要该链接存在于 currentEditData 中，且它的修改时间字段为空或旧，就更新为当前时间。但这样会导致未编辑的链接也被更新时间。
+    // 更合理的方案：在编辑表格中，为每个链接的输入框绑定事件，当内容变化时，设置该链接的一个 dirty 标志，保存时对 dirty 的链接更新时间。
+    // 由于实现稍复杂，且用户主要关心的是“添加和编辑时更新时间”，而当前代码中新增已经生成时间，编辑时我们可以在用户修改字段后，立即更新时间戳（但用户可能多次修改）。
+    // 我们采用一个简单可靠的方法：在 saveEditToGithub 中，比较 currentEditData 与原始加载的 currentTimeMap 对应的链接内容（名称、URL、类别），如果发生变化，则更新时间。
+    // 为了不增加复杂度，我们可以认为：在管理员面板中，用户点击保存时，所有在 currentEditData 中的链接都应该使用最新的修改时间（因为用户可能调整了顺序，但内容未变）。但这样会误更新。
+    // 根据用户要求“在管理员页面中添加、编辑数据的时间”，只有添加和编辑操作才更新。而编辑操作需要检测到变化。
+    // 我将在代码中增加一个简单的比较函数：保存时，对于每个链接，如果它的名称、URL、类别与 currentTimeMap 中存储的原始值（需要额外存储原始数据）不同，则更新其修改时间。
+    // 为了不过度复杂，我选择在编辑表格中，为每个输入框绑定 blur 或 change 事件，当用户修改后，立即将该链接的修改时间设为当前时间。这样保存时就直接使用了新时间。
+    // 这样实现比较直观。我会在 renderEditTable 中为输入框添加 change 事件，当值改变时，更新对应 item 的修改时间为当前时间。
+    // 同时，新增时已经生成时间。删除操作不需要时间。
+    // 修改 renderEditTable 中的输入框事件：
+    // 为 nameInput 和 urlInput 添加 'change' 事件，为 catSelect 添加 'change' 事件，在事件中更新 item.修改时间 = new Date().toISOString()。
+    // 注意：不要重复绑定，可以使用闭包或 dataset 索引，但最简单是直接在创建元素时绑定。
+    
+    // 重新定义 renderEditTable 以包含时间更新逻辑（覆盖上面的函数）
+    // 由于上面已经定义了一个 renderEditTable，我们替换它。为了代码清晰，在下面重新定义并覆盖。
+    // 我会在代码最后部分覆盖函数，但为了避免混乱，直接在此处重新完整定义。
+    // 因为整个 script 会顺序执行，后面的定义会覆盖前面的，所以没问题。
+    // 以下是带有时间更新功能的 renderEditTable：
+    function renderEditTableWithTimeUpdate() {
+        let filtered = [...currentEditData];
+        const kw = searchInput.value.trim().toLowerCase();
+        if (kw) filtered = filtered.filter(item => item.名称.toLowerCase().includes(kw));
+        editTableBody.innerHTML = '';
+        for (let i = 0; i < filtered.length; i++) {
+            const item = filtered[i];
+            const row = editTableBody.insertRow();
+            // 类别下拉
+            const catCell = row.insertCell(0);
+            const catSelect = document.createElement('select');
+            CATEGORIES_ORDER.forEach(cat => {
+                const opt = document.createElement('option');
+                opt.value = cat;
+                opt.textContent = cat;
+                if (cat === item.类别) opt.selected = true;
+                catSelect.appendChild(opt);
+            });
+            catSelect.addEventListener('change', (e) => {
+                item.类别 = e.target.value;
+                item.修改时间 = new Date().toISOString();  // 更新修改时间
+            });
+            catCell.appendChild(catSelect);
+            // 名称
+            const nameCell = row.insertCell(1);
+            const nameInput = document.createElement('input');
+            nameInput.value = item.名称;
+            nameInput.addEventListener('change', (e) => {
+                item.名称 = e.target.value;
+                item.修改时间 = new Date().toISOString();
+            });
+            nameCell.appendChild(nameInput);
+            // URL
+            const urlCell = row.insertCell(2);
+            const urlInput = document.createElement('input');
+            urlInput.value = item.URL;
+            urlInput.addEventListener('change', (e) => {
+                item.URL = fixUrl(e.target.value);
+                item.修改时间 = new Date().toISOString();
+            });
+            urlCell.appendChild(urlInput);
+            // 操作
+            const actionCell = row.insertCell(3);
+            const delBtn = document.createElement('button');
+            delBtn.textContent = '🗑️';
+            delBtn.className = 'action-btn del';
+            delBtn.addEventListener('click', () => {
+                const idx = currentEditData.findIndex(x => x === item);
+                if (idx !== -1) currentEditData.splice(idx, 1);
+                renderEditTableWithTimeUpdate();
+            });
+            actionCell.appendChild(delBtn);
+        }
+    }
+    // 将原来的 renderEditTable 替换为新函数
+    window.renderEditTable = renderEditTableWithTimeUpdate;
+    // 初始化时调用
+    renderEditTableWithTimeUpdate();
+    // 同时修改 addNewEditItem 中新增时设置修改时间（已经做了）
+    // 修改 unlockAndLoad 中加载后调用新渲染函数
+    // 修改 saveEditToGithub 中保存后调用新渲染函数（但不需要）
+    // 为了保持一致，将原来的 renderEditTable 引用全部替换。
+    // 简单起见，在代码中后续调用 renderEditTable 的地方都改为 renderEditTableWithTimeUpdate。
+    // 但为了不遗漏，我将在所有调用处使用新的函数名。
+    // 实际上，我们直接覆盖原函数即可，因为函数名相同，后面的定义会覆盖前面的。
+    // 所以上面的函数定义会覆盖之前的 renderEditTable 函数。
+    
+    // 确保 addNewEditItem 中新增的 item 有修改时间（已有）
+    // 修改 unlockAndLoad 中加载后调用 renderEditTable（现在已是新版本）
+    // 修改 saveEditToGithub 后重新渲染表格时调用 renderEditTable（自动调用新版本）
+    // 修改 searchInput 和 clearSearch 事件中调用的 renderEditTable 也是新版本。
+    
+    // 另外，在 saveEditToGithub 中，我们不需要再额外处理时间，因为编辑时已经更新了 item.修改时间。
+    // 保存时，我们直接将 item.修改时间 写入 timeMap 即可。
+    // 修改 saveEditToGithub 中的 newTimeMap 构建：直接使用 item.修改时间（如果存在），否则从旧 map 取。
+    // 为了确保，我们稍微调整 saveEditToGithub：
+    async function saveEditToGithubFixed() {
+        if (!githubToken) { adminStatus.innerHTML = '<span class="status-error">Token 无效，请重新解锁</span>'; return; }
+        adminStatus.innerHTML = '<span class="status-msg">保存中...</span>';
+        try {
+            const newTimeMap = {};
+            for (let item of currentEditData) {
+                const key = makeKey(item.名称, item.URL);
+                let modTime = item.修改时间;
+                if (!modTime) modTime = currentTimeMap[key];
+                if (!modTime) modTime = new Date().toISOString(); // 保底
+                newTimeMap[key] = modTime;
+                // 同步更新 item.修改时间
+                item.修改时间 = modTime;
+            }
+            await saveAllToGitHub(githubToken, currentEditData, newTimeMap, currentCsvSha, currentTimeSha);
+            await refreshMainPage();
+            adminStatus.innerHTML = '<span class="status-success">✅ 保存成功！数据已同步</span>';
+            setTimeout(() => { adminStatus.innerHTML = ''; }, 3000);
             const { csvSha: newCsvSha, timeSha: newTimeSha } = await (async () => {
                 const csvF = await fetchFileWithToken(githubToken, CSV_FILE);
                 const timeF = await fetchFileWithToken(githubToken, TIME_FILE);
@@ -781,18 +926,61 @@
             adminStatus.innerHTML = `<span class="status-error">❌ 保存失败: ${err.message}</span>`;
         }
     }
-
-    function closeAdmin() {
-        adminModal.classList.remove('active');
-        tokenPanel.style.display = "block";
-        managementPanel.style.display = "none";
-        githubTokenInput.value = '';
-        tokenMsg.innerHTML = '';
-        adminStatus.innerHTML = '';
+    // 替换原 saveEditToGithub
+    window.saveEditToGithub = saveEditToGithubFixed;
+    
+    // 重新绑定事件中的函数引用
+    // 由于上面重新定义了函数，需要确保事件监听器调用的是新函数。
+    // 在初始化时，saveAllBtn 的 click 事件绑定的是 saveEditToGithub（现在指向新函数）。
+    // 同样，addLinkBtn 的 click 事件绑定 addNewEditItem 没有问题。
+    // 搜索和清除事件中调用的 renderEditTable 现在是新版本。
+    // 解锁后调用的 renderEditTable 也是新版本。
+    // 所以不需要额外修改。
+    
+    // 为了确保所有地方都使用新函数，我们在初始化前重新绑定一下事件（可选）。
+    
+    // 注意：由于代码中多次出现 renderEditTable，我们直接覆盖函数名即可，因为函数声明提升。
+    // 但为了保险，在最后重新绑定 saveAllBtn 事件。
+    
+    // 初始化函数
+    function init() {
+        renderNavbar();
+        refreshMainPage();
+        // 重新绑定保存按钮事件，确保使用新函数
+        saveAllBtn.onclick = () => saveEditToGithubFixed();
+        addLinkBtn.onclick = addNewEditItem;
+        searchInput.oninput = () => renderEditTableWithTimeUpdate();
+        clearSearch.onclick = () => { searchInput.value = ''; renderEditTableWithTimeUpdate(); };
+        unlockBtn.onclick = unlockAndLoad;
+        // 其他事件已在前面绑定，无需重复
     }
-
-    // 事件绑定
-    adminFloatBtn.addEventListener('click', () => {
+    
+    // 覆盖原来的 unlockAndLoad 中的 renderEditTable 调用
+    const originalUnlock = unlockAndLoad;
+    window.unlockAndLoad = async function() {
+        const token = githubTokenInput.value.trim();
+        if (!token) { tokenMsg.innerHTML = '<span class="status-error">请输入 Token</span>'; return; }
+        tokenMsg.innerHTML = '<span class="status-msg">验证中...</span>';
+        try {
+            const { data, timeMap, csvSha, timeSha } = await loadDataWithToken(token);
+            currentEditData = data.map(item => ({ ...item }));
+            currentTimeMap = { ...timeMap };
+            currentCsvSha = csvSha;
+            currentTimeSha = timeSha;
+            githubToken = token;
+            sessionStorage.setItem("github_token", token);
+            tokenPanel.style.display = "none";
+            managementPanel.style.display = "block";
+            renderEditTableWithTimeUpdate();  // 使用新渲染函数
+            tokenMsg.innerHTML = '';
+            adminStatus.innerHTML = '<span class="status-success">✅ 编辑模式已解锁</span>';
+        } catch(err) {
+            tokenMsg.innerHTML = `<span class="status-error">❌ ${err.message}</span>`;
+        }
+    };
+    
+    // 重新绑定事件
+    adminFloatBtn.onclick = () => {
         adminModal.classList.add('active');
         const savedToken = sessionStorage.getItem("github_token");
         if (savedToken) {
@@ -802,19 +990,13 @@
             tokenPanel.style.display = "block";
             managementPanel.style.display = "none";
         }
-    });
-    closeAdminModal.addEventListener('click', closeAdmin);
-    window.addEventListener('click', (e) => { if (e.target === adminModal) closeAdmin(); });
-    unlockBtn.addEventListener('click', unlockAndLoad);
-    addLinkBtn.addEventListener('click', addNewEditItem);
-    searchInput.addEventListener('input', () => renderEditTable());
-    clearSearch.addEventListener('click', () => { searchInput.value = ''; renderEditTable(); });
-    saveAllBtn.addEventListener('click', saveEditToGithub);
-    exitAdminBtn.addEventListener('click', closeAdmin);
-
-    // 初始化
-    renderNavbar();
-    refreshMainPage();
+    };
+    closeAdminModal.onclick = closeAdmin;
+    window.onclick = (e) => { if (e.target === adminModal) closeAdmin(); };
+    exitAdminBtn.onclick = closeAdmin;
+    
+    // 启动
+    init();
 </script>
 </body>
 </html>
