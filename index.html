@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>ArticleNavigation · 志存高远</title>
+    <title>ArticleNavigation</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
     <style>
         * {
@@ -775,9 +775,11 @@
                     item.修改时间 = modTime;
                 }
                 await saveAllToGitHub(githubToken, currentEditData, newTimeMap, currentCsvSha, currentTimeSha);
+                // 重新加载公开数据以刷新主页面，确保修改时间正确显示
                 await refreshMainPage();
                 adminStatus.innerHTML = '<span class="status-success">✅ 保存成功！数据已同步</span>';
                 setTimeout(() => { adminStatus.innerHTML = ''; }, 3000);
+                // 更新 sha 和时间映射
                 const { csvSha: newCsvSha, timeSha: newTimeSha } = await (async () => {
                     const csvF = await fetchFileWithToken(githubToken, CSV_FILE);
                     const timeF = await fetchFileWithToken(githubToken, TIME_FILE);
@@ -791,17 +793,17 @@
             }
         }
 
-        // 关闭管理员模态框（必须在全局可访问）
-        window.closeAdmin = function() {
+        // 关闭管理员模态框
+        function closeAdmin() {
             adminModal.classList.remove('active');
             tokenPanel.style.display = "block";
             managementPanel.style.display = "none";
             githubTokenInput.value = '';
             tokenMsg.innerHTML = '';
             adminStatus.innerHTML = '';
-        };
+        }
 
-        // 初始化事件绑定
+        // 事件绑定
         function bindEvents() {
             adminFloatBtn.onclick = () => {
                 adminModal.classList.add('active');
@@ -814,14 +816,14 @@
                     managementPanel.style.display = "none";
                 }
             };
-            closeAdminModal.onclick = () => window.closeAdmin();
-            window.onclick = (e) => { if (e.target === adminModal) window.closeAdmin(); };
+            closeAdminModal.onclick = closeAdmin;
+            window.onclick = (e) => { if (e.target === adminModal) closeAdmin(); };
             unlockBtn.onclick = unlockAndLoad;
             addLinkBtn.onclick = addNewEditItem;
             searchInput.oninput = () => renderEditTable();
             clearSearch.onclick = () => { searchInput.value = ''; renderEditTable(); };
             saveAllBtn.onclick = saveEditToGithub;
-            exitAdminBtn.onclick = () => window.closeAdmin();
+            exitAdminBtn.onclick = closeAdmin;
         }
 
         // 初始化
