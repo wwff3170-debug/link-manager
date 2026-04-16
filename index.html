@@ -172,6 +172,7 @@
             width: 100%;
             border-collapse: collapse;
             font-size: 0.95rem;
+            table-layout: fixed;  /* 固定表格布局，配合省略号 */
         }
         .links-table th {
             text-align: left;
@@ -184,14 +185,25 @@
         .links-table td {
             padding: 14px 20px;
             border-bottom: 1px solid #e9f0f5;
+            white-space: nowrap;      /* 强制单行 */
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
-        .name-col { width: 70%; }
-        .time-col { width: 30%; white-space: nowrap; }
+        .name-col {
+            width: 70%;
+        }
+        .time-col {
+            width: 30%;
+            white-space: nowrap;
+        }
         .link-name a {
             text-decoration: none;
             font-weight: 500;
             color: #2c7cb6;
             transition: 0.2s;
+            display: block;           /* 让链接占满单元格，方便省略 */
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .link-name a:hover {
             color: #0f5b8c;
@@ -406,8 +418,15 @@
     <div class="card">
         <div class="table-wrapper">
             <table class="links-table">
-                <thead><tr><th class="name-col">名称</th><th class="time-col">修改时间</th></tr></thead>
-                <tbody id="tableBody"><tr><td colspan="2" class="empty-msg">加载中...</td></tr></tbody>
+                <thead>
+                    <tr>
+                        <th class="name-col">名称</th>
+                        <th class="time-col">修改时间</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody">
+                    <tr><td colspan="2" class="empty-msg">加载中...</td></tr>
+                </tbody>
             </table>
         </div>
     </div>
@@ -447,7 +466,9 @@
                 </div>
                 <div class="table-wrapper">
                     <table class="admin-table" id="editTable">
-                        <thead><tr><th>类别</th><th>名称</th><th>URL</th><th>操作</th></tr></thead>
+                        <thead>
+                            <tr><th>类别</th><th>名称</th><th>URL</th><th>操作</th></tr>
+                        </thead>
                         <tbody id="editTableBody"></tbody>
                     </table>
                 </div>
@@ -467,7 +488,7 @@
         const REPO_OWNER = "wwff3170-debug";
         const REPO_NAME   = "link-manager";
         const CSV_FILE = "links.csv";
-        const TIME_FILE = "timestamps.json";   // 已去掉开头的点
+        const TIME_FILE = "timestamps.json";
         const CATEGORIES_ORDER = ["毕业喽", "AI学习", "代码", "学习", "杂乱学习", "实用工具", "就业考公", "其他"];
         const BRANCH = "main";
 
@@ -512,6 +533,15 @@
             return arr.slice().sort((a, b) => (orderMap[a.类别] || 999) - (orderMap[b.类别] || 999));
         }
 
+        // 按修改时间降序排列（最新在前）
+        function sortByTimeDesc(arr) {
+            return arr.slice().sort((a, b) => {
+                const timeA = a.修改时间 ? new Date(a.修改时间).getTime() : 0;
+                const timeB = b.修改时间 ? new Date(b.修改时间).getTime() : 0;
+                return timeB - timeA;
+            });
+        }
+
         // ========== 公开读取（使用相对路径，无 API 限制） ==========
         async function loadPublicData() {
             try {
@@ -527,7 +557,7 @@
                     const cat = (row['类别'] || '').trim();
                     if (name && url && cat) rawLinks.push({ 名称: name, URL: fixUrl(url), 类别: cat });
                 }
-                // 读取时间戳文件（公开，可能不存在）
+                // 读取时间戳文件
                 let timeMap = {};
                 try {
                     const timeResp = await fetch('./' + TIME_FILE);
@@ -548,6 +578,7 @@
                     const modTime = timeMap[key] || null;
                     return { ...link, 修改时间: modTime };
                 });
+                // 先按类别排序，然后每个类别内部按时间降序（在主页面渲染时处理）
                 combined = sortByCategoryOrder(combined);
                 return combined;
             } catch(e) {
@@ -654,7 +685,10 @@
         }
 
         function renderMainTable() {
-            const filtered = linksData.filter(item => item.类别 === currentCategory);
+            // 先按类别过滤
+            let filtered = linksData.filter(item => item.类别 === currentCategory);
+            // 再按修改时间降序排列（最新在前）
+            filtered = sortByTimeDesc(filtered);
             if (filtered.length === 0) {
                 tableBody.innerHTML = '<tr><td colspan="2" class="empty-msg">📭 该分类暂无链接</td></tr>';
                 return;
@@ -662,7 +696,7 @@
             let html = '';
             for (let item of filtered) {
                 html += `<tr>
-                    <td class="name-col link-name"><a href="${escapeHtml(item.URL)}" target="_blank">${escapeHtml(item.名称)}</a></td>
+                    <td class="name-col link-name"><a href="${escapeHtml(item.URL)}" target="_blank" title="${escapeHtml(item.名称)}">${escapeHtml(item.名称)}</a></td>
                     <td class="time-col">${formatDate(item.修改时间)}</td>
                 </tr>`;
             }
