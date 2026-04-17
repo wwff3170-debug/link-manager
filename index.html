@@ -381,7 +381,6 @@
             border: 1px solid #c0d4e8;
             background: white;
         }
-        /* 新增：顶部按钮行样式 */
         .action-bar {
             display: flex;
             justify-content: flex-end;
@@ -453,11 +452,13 @@
                 </div>
             </div>
             <div id="managementPanel" style="display:none;">
-                <!-- 新增的顶部按钮行 -->
+                <!-- 顶部按钮行 -->
                 <div class="action-bar">
                     <button id="saveAllBtn" class="btn-primary">💾 保存到仓库</button>
                     <button id="exitAdminBtn" class="btn-secondary">退出</button>
                 </div>
+                <!-- 状态提示移到这里 -->
+                <div id="adminStatus" class="status-msg"></div>
                 <div class="add-bar">
                     <select id="newCat">
                         <option>毕业喽</option><option>AI学习</option><option>代码</option><option>学习</option><option>杂乱学习</option><option>实用工具</option><option>就业考公</option><option>其他</option>
@@ -478,7 +479,6 @@
                         <tbody id="editTableBody"></tbody>
                     </table>
                 </div>
-                <div id="adminStatus" class="status-msg"></div>
             </div>
         </div>
     </div>
