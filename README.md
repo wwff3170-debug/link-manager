@@ -1,4 +1,5 @@
 # 链接管理器
+详见我的另一个仓库 FrequentLinks ，两个仓库的区别是： FrequentLinks 主要是 Web 平台的导航，本仓库是文章、细部链接的导航
 
 基于 GitHub Pages 的个人链接收藏工具，支持分类浏览、增删改查，数据存储在仓库中的 `links.csv` (仅三列) 和 `.timestamps.json` 中。
 
