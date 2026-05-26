@@ -367,6 +367,25 @@
             margin: 0 5px;
         }
         .del { color: #d9534f; }
+        .search-bar-main {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 20px 24px 0 24px;
+        }
+        .search-bar-main input {
+            flex: 1;
+            padding: 10px 18px;
+            border-radius: 50px;
+            border: 1px solid #c0d4e8;
+            background: white;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .search-bar-main input:focus {
+            border-color: #2c7cb6;
+        }
         .search-bar, .add-bar {
             display: flex;
             flex-wrap: wrap;
@@ -417,6 +436,10 @@
 
 <div class="container">
     <div class="card">
+        <div class="search-bar-main">
+            <input type="text" id="mainSearchInput" placeholder="🔍 在当前分类中搜索标题...">
+            <span id="mainClearSearch" style="cursor:pointer; color:#2c7cb6; display:none; white-space:nowrap;">✖ 清除</span>
+        </div>
         <div class="table-wrapper">
             <table class="links-table">
                 <thead>
@@ -497,6 +520,7 @@
 
         let linksData = [];
         let currentCategory = CATEGORIES_ORDER[0];
+        let searchTerm = '';
         let githubToken = null;
         let editData = [];
         let currentTimeMap = {};
@@ -520,6 +544,8 @@
         const newUrl = document.getElementById("newUrl");
         const searchInput = document.getElementById("searchInput");
         const clearSearch = document.getElementById("clearSearch");
+        const mainSearchInput = document.getElementById("mainSearchInput");
+        const mainClearSearch = document.getElementById("mainClearSearch");
         const saveAllBtn = document.getElementById("saveAllBtn");
         const exitAdminBtn = document.getElementById("exitAdminBtn");
         const adminStatus = document.getElementById("adminStatus");
@@ -688,9 +714,13 @@
 
         function renderMainTable() {
             let filtered = linksData.filter(item => item.类别 === currentCategory);
+            if (searchTerm) {
+                filtered = filtered.filter(item => item.名称.toLowerCase().includes(searchTerm.toLowerCase()));
+            }
             filtered = sortByTimeDesc(filtered);
             if (filtered.length === 0) {
-                tableBody.innerHTML = '<tr><td colspan="2" class="empty-msg">📭 该分类暂无链接</td></tr>';
+                const msg = searchTerm ? '🔍 未找到匹配的链接' : '📭 该分类暂无链接';
+                tableBody.innerHTML = `<tr><td colspan="2" class="empty-msg">${msg}</td></tr>`;
                 return;
             }
             let html = '';
@@ -813,7 +843,8 @@
                     item.修改时间 = modTime;
                 }
                 await saveAllToGitHub(githubToken, currentEditData, newTimeMap, currentCsvSha, currentTimeSha);
-                await refreshMainPage();
+                linksData = currentEditData.map(item => ({ ...item }));
+                renderMainTable();
                 adminStatus.innerHTML = '<span class="status-success">✅ 保存成功！数据已同步</span>';
                 setTimeout(() => { adminStatus.innerHTML = ''; }, 3000);
                 const { csvSha: newCsvSha, timeSha: newTimeSha } = await (async () => {
@@ -858,6 +889,17 @@
             clearSearch.onclick = () => { searchInput.value = ''; renderEditTable(); };
             saveAllBtn.onclick = saveEditToGithub;
             exitAdminBtn.onclick = closeAdmin;
+            mainSearchInput.oninput = () => {
+                searchTerm = mainSearchInput.value.trim();
+                mainClearSearch.style.display = searchTerm ? 'inline' : 'none';
+                renderMainTable();
+            };
+            mainClearSearch.onclick = () => {
+                mainSearchInput.value = '';
+                searchTerm = '';
+                mainClearSearch.style.display = 'none';
+                renderMainTable();
+            };
         }
 
         function init() {
